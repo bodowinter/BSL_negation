@@ -1,0 +1,1842 @@
+---
+title: "Analysis of BSL corpus negations"
+author: "Bodo Winter"
+date: "02/06/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Analysis of data annotated for negation in the BSL corpus.
+
+Load packages:
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse) # for data processing, including ggplot2 graphs
+library(gridExtra)
+library(lsr) # for Cramer's V effect size
+```
+
+Check R version and package version for reporting:
+
+```{r}
+R.Version()
+packageVersion('tidyverse')
+packageVersion('gridExtra')
+packageVersion('lsr')
+```
+
+Load helper functions, which makes "percentage()" and a ggtheme available.
+
+```{r}
+source('negation_helper_functions.R')
+```
+
+Load data:
+
+```{r, message = FALSE, warning = FALSE}
+neg <- read_csv('../data/BSL_negation_12_June_2020.csv')
+```
+
+Show first few rows and all columns:
+
+```{r}
+neg %>% print(n = 2, width = Inf)
+```
+
+## Preprocessing and cleaning
+
+Change hyphens in column names to underscores to avoid tidyverse complications:
+
+```{r}
+colnames(neg) <- str_replace_all(colnames(neg), '-', '_')
+colnames(neg)[1] <- 'CLU_value'
+
+# Check:
+
+colnames(neg)
+```
+
+Process the string that comes from the filename, which contains information about location, gender, age, ethnicity and handedness.
+
+First, extract location information. The "LocationCode" column will contain the first two letters of the string, which is the two-letter identifier for each city (BM = Birmingham, LN = London, MC = Manchester, BL = Bristol). The "Location" column will contain the full name of the city.
+
+```{r}
+neg <- mutate(neg,
+              LocationCode = str_sub(CLU_value, 1, 2),
+              Location = ifelse(LocationCode == 'BM', 'Birmingham', LocationCode),
+              Location = ifelse(LocationCode == 'LN', 'London', Location),
+              Location = ifelse(LocationCode == 'MC', 'Manchester', Location),
+              Location = ifelse(LocationCode == 'BL', 'Bristol', Location))
+```
+
+Extract the participant identifier. Participants are given a numerical identifier (1 to 35), however, this number is repeated across cities, e.g., we have both "BL07" and "BM07" in this data, which are different individuals. So the city code plus number works as a unique identifier, which is the first four characters of the string.
+
+```{r}
+neg <- mutate(neg,
+              Participant = str_sub(CLU_value, 1, 4))
+```
+
+Gender information is a single letter (M = male, F = female) that follows the numerical identifier.
+
+```{r}
+neg <- mutate(neg,
+              Gender = str_sub(CLU_value, 5, 5))
+```
+
+Extract the age information, which follows gender.
+
+```{r}
+neg <- mutate(neg,
+              Age = str_sub(CLU_value, 6, 7),
+              Age = as.numeric(Age))
+```
+
+Extract ethnicity information, which follows age. The codes mean A = Asian, B = Black, W = White. The "EthnicityCode" column will contain the identifier, and the "Ethnicity" column will contain the full label.
+
+```{r}
+neg <- mutate(neg,
+              EthnicityCode = str_sub(CLU_value, 8, 8),
+              Ethnicity = ifelse(EthnicityCode == 'A', 'Asian', EthnicityCode),
+              Ethnicity = ifelse(EthnicityCode == 'B', 'Black', Ethnicity),
+              Ethnicity = ifelse(EthnicityCode == 'W', 'White', Ethnicity))
+```
+
+Extract information about whether the family is deaf (D) or hearing (H). As before, "FamilyCode" will contain the single-letter character identifier and "Family" the full label.
+
+```{r}
+neg <- mutate(neg,
+              FamilyCode = str_sub(CLU_value, 9, 9),
+              Family = ifelse(FamilyCode == 'D', 'Deaf', FamilyCode),
+              Family = ifelse(FamilyCode == 'H', 'Hearing', Family))
+```
+
+Extract information about whether the signer is left- or right-handed. There are no ambidextrous participants in this dataset. All left-hand-dominant signers are marked with "_LH"; the right-handed signers are unmarked.
+
+```{r}
+neg <- mutate(neg,
+              HandednessCode = ifelse(str_detect(CLU_value, 'LH'), 'LH', 'RH'),
+              Handedness = ifelse(HandednessCode == 'LH', 'left-handed', 'right-handed'))
+```
+
+Process the "Negation" column so that "INDEFINITE" is "Indefinite".
+
+```{r}
+neg <- mutate(neg,
+              Negation = ifelse(Negation == 'INDEFINITE', 'Indefinite', Negation))
+```
+
+## Preprocessing head shakes, mouth gestures, and multi-strategy counts
+
+Create a variable that codes for the presence absence of mouth gestures.
+
+```{r}
+neg <- mutate(neg,
+              MouthGesture_YesNo = ifelse(is.na(MouthGestF_value),
+                                         'No mouth gesture', 'Mouth gesture'))
+```
+
+Rename the head negation column for easier typing and shorter lines:
+
+```{r}
+neg <- rename(neg,
+              HS = HeadNegationStudy_value)
+```
+
+Check presence of head shaking for negation:
+
+```{r}
+neg %>%
+  count(HS, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% print(n = Inf)
+```
+
+This one is more complex, with 38 unique labels, including many different combinations.
+
+Many of these are due to trailing spaces, e.g., "NHS , HS" is treated as separately from "NHS, HS" because of the extra space. So getting rid of trailing spaces should reduce the number of categories. In other cases, there are missing commas which create artificially separated labels, e.g. 'HS NHS' should be the same as 'HS, NHS'.
+
+```{r}
+neg <- mutate(neg,
+              HS = str_replace(HS, ' ,', ''),
+              HS = str_replace(HS, 'NHS HS', 'NHS, HS'),
+              HS = ifelse(HS == 'NHS, HS? , NHS', 'NHS, HS?, NHS', HS),
+              HS = ifelse(HS == 'HS NHS', 'HS, NHS', HS),
+              HS = ifelse(HS == 'HS,', 'HS', HS))
+```
+
+Check again:
+
+```{r}
+neg %>%
+  count(HS, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% print(n = Inf)
+```
+
+Now on to the more substantive (theoretically incisive) re-codings.
+
+So "HS?" is an uncertain case of a headshake, erring on the side of present, whereas "NHS?" is an uncertain case erring on the side of absent. However, there are also combinations of these values with uncertain cases. such as "NHS, HS?". The question then is whether this should count towards "HS", since the coding scheme says this "errs on the side of present". There is only one case of "NHS?", which means that this is pretty much marginal and can be ignored. This is a questionable case, but it is definitely not a headshake.
+
+So I will create a variable which specifies whether there is any headshake present or not, but it will specify whether there are multiple instances. Also, because "NHS, HS" and "HS, NHS" are both quite frequent, it's important to distinguish them.
+
+I will create a new variable that has the following categories:
+
+* HS only (this will include "HS?" which is very few cases anyway; also multiple HS cases)
+* NHS only (no head shake whatsoever; this will also include the single case of "NHS?")
+* NHS > HS (this will include "NHS, HS?")
+* HS > NHS (this will include "HS?, NHS")
+* Other combinations that are more complex than NHS > HS, HS > NHS
+* HS combined with nods (this includes cases with NHS)
+* Nod only (including "NHS, Nod")
+
+In this coding scheme, I will treat "HS1" as "HS", since this would proliferate categories even more. A single head shake is a headshake after all.
+
+```{r}
+combos <- c('NHS, HS, NHS', 'HS, NHS, HS', 'NHS, HS NHS',
+            'NHS, HS, HS', # not sure if this should be counted as NHS > HS
+            'NHS, HS, NHS, HS', 'NHS, HS, NHS, HS, NHS',
+            'NHS, HS, NHS, NHS') 
+HS_with_nod <- c('HS, Nod', 'Nod, HS', 'NHS, HS, Nod',
+                 'NHS, HS, Nod, NHS Nod', 'NHS, HS+Nod', 'Nod, NHS, HS')
+
+neg <- mutate(neg,
+              HS_new = str_replace_all(HS, '1', ''),
+              HS_new = str_replace_all(HS_new, '\\?', ''),
+              HS_new = ifelse(HS_new %in% combos,
+                              'Combination with HS', HS_new),
+              HS_new = ifelse(HS_new == 'HS, HS',
+                              'HS', HS_new),
+              HS_new = ifelse(HS_new == 'HS, HS, HS',
+                              'HS', HS_new),
+              HS_new = ifelse(HS_new %in% HS_with_nod,
+                              'HS with nod', HS_new),
+              HS_new = ifelse(HS_new == 'NHS, Nod',
+                              'Nod', HS_new))
+```
+
+Create a variable that codes for whether there is any head shake whatsoever.
+
+```{r}
+no_HS <- c('Nod', 'NHS')
+neg <- mutate(neg,
+              HS_YesNo = ifelse(!HS_new %in% no_HS, 'Any\nhead shake', 'No\nhead shake'))
+```
+
+For this, we will first create a variable which contains information about whether there is ANY manual sign, that is, collapsing the 'multiple' and 'single' categories:
+
+```{r}
+neg <- mutate(neg,
+              Manual_YesNo = ifelse(N_manual_value == 'Absent', 'no manual sign',
+                                    'manual sign'),
+              Mouthing_YesNo = ifelse(MouthingNegation_value == 'Absent',
+                                      'no mouthing', 'mouthing'),
+              HS_YesNo = ifelse(HS_YesNo == 'No\nhead shake',
+                                'no HS', 'HS'))
+```
+
+Create a variable where they are treated numerical, with present = 1 and absent = 0. That way we can add them up. Something that has manual negation and negation in mouthing would then get a "2", something that additionally has a headshake, will get a "3", and so on.
+
+```{r}
+neg <- mutate(neg,
+              Manual_01 = ifelse(Manual_YesNo == 'no manual sign', 0, 1),
+              Mouthing_01 = ifelse(Mouthing_YesNo == 'no mouthing', 0, 1),
+              MouthGesture_01 = ifelse(MouthGesture_YesNo == 'No mouth gesture', 0, 1),
+              HS_01 = ifelse(HS_YesNo == 'no HS', 0, 1),
+              FormSum = Manual_01 + Mouthing_01 + MouthGesture_01 + HS_01)
+```
+
+Convert "pre-container, contained" and "pre-container, contained+pre-container" to "Complex", as well as "contained+contained" to "contained". Then capitalize the first letter for plotting:
+
+```{r}
+complex <- c('pre-container, contained', 'contained+pre-container',
+             'pre-container, contained+pre-container')
+
+neg <- mutate(neg,
+              CLUwithin_simple = ifelse(CLUwithinCLU_value %in% complex,
+                                        'Combination', CLUwithinCLU_value),
+              CLUwithin_simple = ifelse(CLUwithin_simple == 'contained+contained',
+                                        'Contained', CLUwithin_simple),
+              CLUwithin_simple = str_to_sentence(CLUwithin_simple))
+```
+
+## Preprocessing BSL teaching data
+
+In this section, we will incorporate the BSL teaching data.
+
+```{r, message = FALSE, warning = FALSE}
+ppts <- read_csv('../data/ParticipantSpreadsheet11JUN14ANON.csv')
+```
+
+Get the relevant column:
+
+```{r}
+ppts <- select(ppts,
+               `Overall code`, `Taught BSL`) %>% 
+  rename(ID = `Overall code`,
+         Taught_BSL_YesNo = `Taught BSL`)
+```
+
+Extract the ID from the "CLU_value" column:
+
+```{r}
+neg <- mutate(neg,
+              ID = str_sub(CLU_value, 1, 9))
+```
+
+Merge the "ppts" BSL teaching data into the "neg" data frame:
+
+```{r}
+# Check that they all match:
+
+all(!is.na(match(neg$ID, ppts$ID)))
+```
+
+They do. So let's merge it in:
+
+```{r}
+neg <- left_join(neg, ppts)
+```
+
+Check:
+
+```{r}
+neg$Taught_BSL_YesNo
+```
+
+
+
+## Overview of sample
+
+This section characterizes the sample and gives an overall overview of the data.
+
+How many data points are there in total?
+
+```{r}
+nrow(neg)
+```
+
+How many participants are there?
+
+```{r}
+n_distinct(neg$Participant)
+```
+
+How many men and women?
+
+```{r}
+neg %>%
+  count(Gender, Participant) %>% 
+  select(-(Participant:n)) %>% 
+  count(Gender)
+```
+
+How many participants per city?
+
+```{r}
+neg %>%
+  count(Location, Participant) %>% 
+  select(-(Participant:n)) %>% 
+  count(Location)
+```
+
+What is the participant age? (mean, standard deviation, range)
+
+```{r}
+neg %>%
+  summarize(AgeMean = mean(Age),
+            AgeSD = sd(Age),
+            AgeMin = min(Age),
+            AgeMax = max(Age))
+```
+
+How many per self-reported ethnicity?
+
+```{r}
+neg %>%
+  count(Ethnicity, Participant) %>% 
+  select(-(Participant:n)) %>% 
+  count(Ethnicity) %>% 
+  mutate(Perc = percentage(n))
+```
+
+How many from deaf or hearing families?
+
+```{r}
+neg %>% 
+  count(Family, Participant) %>% 
+  count(Family) %>% 
+  mutate(Perc = percentage(n))
+```
+
+How many have taught BSL?
+
+```{r}
+neg %>% 
+  count(Taught_BSL_YesNo, Participant) %>% 
+  select(-(Participant:n)) %>% 
+  count(Taught_BSL_YesNo) %>% 
+  mutate(Perc = percentage(n))
+```
+
+How many are left or right-handed?
+
+```{r}
+neg %>% 
+  count(Handedness, Participant) %>% 
+  select(-(Participant:n)) %>% 
+  count(Handedness) %>% 
+  mutate(Perc = percentage(n))
+```
+
+
+Look at how many data points there are per participants, as well as the average number and range of data points per participant.
+
+```{r}
+sort(table(neg$Participant))
+
+mean(table(neg$Participant))
+
+range(table(neg$Participant))
+```
+
+## Descriptive stats: Negation type
+
+Check negation counts:
+
+```{r}
+neg %>%
+  count(Negation, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Check overall number of question-marked cases versus clear cases:
+
+```{r}
+neg %>%
+  mutate(QuestionMark = str_detect(Negation, '\\?')) %>% 
+  count(QuestionMark) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Create counts that exclude the ones with question marks:
+
+```{r}
+neg %>%
+  mutate(Negation = ifelse(str_detect(Negation, '\\?'),
+                           'Uncertain', Negation)) %>% 
+  count(Negation, sort = TRUE) %>%
+  # filter(!str_detect(Negation, '\\?')) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of this:
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+neg_p <- neg %>%
+  mutate(Negation = ifelse(str_detect(Negation, '\\?'),
+                           'Uncertain', Negation)) %>% 
+  count(Negation, sort = TRUE) %>%
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         Negation = ifelse(Negation == 'Non-negated clause',
+                           'Non-negated\nclause', Negation),
+         Negation = ifelse(Negation == 'Negated clause',
+                           'Negated\nclause', Negation),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(Negation, Proportion),
+             y = Proportion, fill = reorder(Negation, Proportion)))
+
+# Add geoms:
+
+neg_p <- neg_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+neg_p <- neg_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(a) Negation type') +
+  theme_BSL()
+
+# Plot:
+
+neg_p
+
+# Save:
+
+ggsave('../figures/negation_type.pdf', neg_p, width = 4.5, height = 5)
+ggsave('../figures/negation_type.png', neg_p, width = 4.5, height = 5)
+```
+
+For the following, we will only consider the negated clauses (N = 420).
+
+```{r}
+neg <- filter(neg,
+              Negation == 'Negated clause')
+```
+
+
+## Descriptive stats: Clause type
+
+Check CLU (Clause Like Unit) type counts:
+
+```{r}
+neg %>%
+  count(CLUcomposite_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Check overall number of question-marked cases versus clear cases:
+
+```{r}
+neg %>%
+  mutate(CLUcomposite_value = str_detect(CLUcomposite_value, '\\?')) %>% 
+  count(CLUcomposite_value) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Create counts that combine the ones with question marks:
+
+```{r}
+neg %>%
+  mutate(CLUcomposite_value = ifelse(str_detect(CLUcomposite_value, '\\?'),
+                           'Uncertain', CLUcomposite_value)) %>% 
+  count(CLUcomposite_value, sort = TRUE) %>%
+  # filter(!str_detect(CLUcomposite_value, '\\?')) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Create a new column out of the old one "CLU_simplified" which merges all the combinations (EmbedEmbed, DependDepend, DependEmbed, and EmbedDepend).
+
+```{r}
+# Combine combinations:
+
+combinations <- c('EmbedDepend', 'DependEmbed', 'EmbedEmbed', 'DependDepend')
+neg <- mutate(neg,
+              CLU_simplified = ifelse(CLUcomposite_value %in% combinations,
+                                      'Combination', CLUcomposite_value))
+```
+
+Convert questionable cases to a new label 'Uncertain' for this new simplified variable only. This will simplify plotting.
+
+```{r}
+neg <- mutate(neg,
+              CLU_simplified = ifelse(str_detect(CLU_simplified, '\\?'),
+                                      'Uncertain', CLU_simplified))
+```
+
+Create counts for this new variable:
+
+```{r}
+neg %>%
+  count(CLU_simplified, sort = TRUE) %>%
+  filter(!CLU_simplified %in% c('Questionable','Fragment')) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of this, without the single case of "fragment" and without the questionables. Also simplify the "SharedCecho" label to just "Echo" for plotting.
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+CLU_p <- neg %>%
+  filter(!CLU_simplified %in% c('Fragment')) %>% 
+  count(CLU_simplified, sort = TRUE) %>%
+  mutate(CLU_simplified = ifelse(CLU_simplified == 'SharedCecho',
+                                 'Echo', CLU_simplified),
+         Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(CLU_simplified, Proportion),
+             y = Proportion, fill = reorder(CLU_simplified, Proportion)))
+
+# Add geoms:
+
+CLU_p <- CLU_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+CLU_p <- CLU_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(b) Clause type') +
+  theme_BSL()
+
+# Plot:
+
+CLU_p
+
+# Save:
+
+ggsave('../figures/CLU_type.pdf', CLU_p, width = 6.5, height = 5)
+ggsave('../figures/CLU_type.png', CLU_p, width = 6.5, height = 5)
+```
+
+## Double plot: Clause type & negation type
+
+Put both of these into a joint plot with gridExtra. First, design a layout matrix, where 1 = plot 1, and 2 = plot 2. NA is the padding between plots.
+
+```{r}
+fig1_matrix <- matrix(c(1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2),
+                      nrow = 1)
+```
+
+Use grid.arrange() to put them both into a plot with the specified matrix.
+
+```{r}
+# When included in double plot, we don't need y-axis label for the (b) plot again:
+
+CLU_p <- CLU_p +
+  ylab('')
+
+fig1 <- grid.arrange(neg_p, CLU_p,
+                     layout_matrix = fig1_matrix)
+
+# Save:
+
+ggsave('../figures/negation_clause_type_both.pdf', fig1, width = 12, height = 5)
+ggsave('../figures/negation_clause_type_both.png', fig1, width = 12, height = 5)
+```
+
+## Split dataset based on single versus complex clauses
+
+Take a backup:
+
+```{r}
+# Make a backup just in case:
+neg_full <- neg
+```
+
+Work only with single clause negations from now on, but we also want the same for complex:
+
+```{r}
+compl <- filter(neg,
+              CLU_simplified != 'Single')
+neg <- filter(neg,
+              CLU_simplified == 'Single')
+```
+
+## Descriptive stats: Function of negation
+
+Check counts:
+
+```{r}
+neg %>%
+  count(N_function_value, sort = TRUE) %>%
+  filter(!is.na(N_function_value)) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of the single ones:
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+function_p <- neg %>%
+  count(N_function_value, sort = TRUE) %>%
+  filter(!is.na(N_function_value)) %>% 
+  mutate(N_function_value = str_replace(N_function_value, 'Neg/', ''),
+         Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(N_function_value, Proportion),
+             y = Proportion, fill = reorder(N_function_value, Proportion)))
+
+# Add geoms:
+
+function_p <- function_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+function_p <- function_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 0.85)) +
+  xlab('') +
+  ggtitle('Functions') +
+  theme_BSL_45()
+
+# Plot:
+
+function_p
+
+# Save:
+
+ggsave('../figures/function.pdf', function_p, width = 6.5, height = 5)
+ggsave('../figures/function.png', function_p, width = 6.5, height = 5)
+```
+
+
+## Descriptive stats: Manual negation
+
+How many of negations are signalled via manual signs?
+
+```{r}
+neg %>%
+  count(N_manual_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+For reporting, get the counts of those cases with any manual sign (single + multiple):
+
+```{r}
+neg %>%
+  mutate(N_manual_value = ifelse(N_manual_value == 'Absent', 'no manual', 'manual')) %>% 
+  count(N_manual_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of this.
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+manual_p <- neg %>%
+  count(N_manual_value, sort = TRUE) %>%
+  mutate(N_manual_value = ifelse(N_manual_value == 'Single',
+                                 'Single\nmanual sign', N_manual_value),
+         N_manual_value = ifelse(N_manual_value == 'Multiple',
+                                 'Multiple\nmanual signs', N_manual_value),
+         N_manual_value = ifelse(N_manual_value == 'Absent',
+                                 'No manual\nnegation', N_manual_value),
+         Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(N_manual_value, Proportion),
+             y = Proportion, fill = reorder(N_manual_value, Proportion)))
+
+# Add geoms:
+
+manual_p <- manual_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+manual_p <- manual_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(a) Manual negation') +
+  theme_BSL()
+
+# Plot:
+
+manual_p
+
+# Save:
+
+ggsave('../figures/manual_type.pdf', manual_p, width = 6.5, height = 5)
+ggsave('../figures/manual_type.png', manual_p, width = 6.5, height = 5)
+```
+
+## Descriptive stats: Non-manual negation
+
+See whether there is or isn't non-manual negation.
+
+```{r}
+neg %>%
+  count(N_nonmanual_value , sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of this.
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+nonmanual_p <- neg %>%
+  count(N_nonmanual_value , sort = TRUE) %>%
+  mutate(N_nonmanual_value = ifelse(N_nonmanual_value == 'Present',
+                                    'Non-manual\nnegation',
+                                    'No non-manual\nnegation'),
+         Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(N_nonmanual_value, Proportion),
+             y = Proportion, fill = reorder(N_nonmanual_value, Proportion)))
+
+# Add geoms:
+
+nonmanual_p <- nonmanual_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+nonmanual_p <- nonmanual_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(b) Non-manual negation') +
+  theme_BSL()
+
+# Plot:
+
+nonmanual_p
+
+# Save:
+
+ggsave('../figures/nonmanual_type.pdf', nonmanual_p, width = 6.5, height = 5)
+ggsave('../figures/nonmanual_type.png', nonmanual_p, width = 6.5, height = 5)
+```
+
+
+## Double plot: Manual and non-manual
+
+Put manual versus non-manual into one figure. First, design a layout matrix, where 1 = plot 1, and 2 = plot 2. NA is the padding between plots.
+
+```{r}
+CLU_matrix <- matrix(c(1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2),
+                      nrow = 1)
+```
+
+Use grid.arrange() to put them both into a plot with the specified matrix.
+
+```{r}
+# When included in double plot, we don't need y-axis label for the (b) plot again:
+
+nonmanual_p <- nonmanual_p +
+  ylab('')
+
+CLU_subtype_p <- grid.arrange(manual_p, nonmanual_p,
+                              layout_matrix = CLU_matrix)
+
+# Save:
+
+ggsave('../figures/manual_vs_nonmanual.pdf', CLU_subtype_p, width = 12, height = 5)
+ggsave('../figures/manual_vs_nonmanual.png', CLU_subtype_p, width = 12, height = 5)
+```
+
+
+
+## Descriptive stats: Negation in mouthing
+
+Check the presence absence of negation in mouthing or not.
+
+```{r}
+neg %>%
+  count(MouthingNegation_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+For reporting, it'll also be good to just mention the number of mouthing-negations (single + multiple) versus those without (absent):
+
+```{r}
+neg %>%
+  mutate(MouthingNegation_value = ifelse(MouthingNegation_value == 'Absent',
+                                         'no mouthing', 'mouthing')) %>% 
+  count(MouthingNegation_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+
+```
+
+Make a plot of this.
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+mouthing_p <- neg %>%
+  count(MouthingNegation_value, sort = TRUE) %>%
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(MouthingNegation_value, Proportion),
+             y = Proportion, fill = reorder(MouthingNegation_value, Proportion)))
+
+# Add geoms:
+
+mouthing_p <- mouthing_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+mouthing_p <- mouthing_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(a) Mouthing') +
+  theme_BSL()
+
+# Plot:
+
+mouthing_p
+
+# Save:
+
+ggsave('../figures/mouthing_negation.pdf', mouthing_p, width = 6.5, height = 5)
+ggsave('../figures/mouthing_negation.png', mouthing_p, width = 6.5, height = 5)
+```
+
+What types of mouthings are they? (check glosses)
+
+```{r}
+neg %>%
+  filter(!is.na(Mouthing_value)) %>% 
+  count(Mouthing_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% 
+  print(n = 20)
+```
+
+
+## Descriptive stats: Mouth gestures
+
+Count the presence/absence of mouth gesture variable:
+
+```{r}
+neg %>%
+  count(MouthGesture_YesNo, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+What mouth gestures are there? (check glosses)
+
+```{r}
+neg %>%
+  filter(!is.na(MouthGestF_value)) %>% 
+  count(MouthGestF_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of this.
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+Mgesture_p <- neg %>%
+  count(MouthGesture_YesNo, sort = TRUE) %>%
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(MouthGesture_YesNo, desc(Proportion)),
+             y = Proportion, fill = reorder(MouthGesture_YesNo, desc(Proportion))))
+
+# Add geoms:
+
+Mgesture_p <- Mgesture_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+Mgesture_p <- Mgesture_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(b) Mouth gestures') +
+  theme_BSL()
+
+# Plot:
+
+Mgesture_p
+
+# Save:
+
+ggsave('../figures/mouth_gesture.pdf', Mgesture_p, width = 6.5, height = 5)
+ggsave('../figures/mouth_gesture.png', Mgesture_p, width = 6.5, height = 5)
+```
+
+
+
+## Double-plot: Mouthing and mouth gestures
+
+Make a double plot of mouthing and mouth gestures. First, design matrix.
+
+```{r}
+fig_matrix <- matrix(c(1, 1, 1, 1, 1, 2, 2, 2, 2),
+                     nrow = 1)
+```
+
+Use grid.arrange() to put them both into a plot with the specified matrix.
+
+```{r}
+# When included in double plot, we don't need y-axis label for the (c) plot again:
+
+Mgesture_p <- Mgesture_p +
+  ylab('')
+
+mouthin_mouth_gesture <- grid.arrange(mouthing_p, Mgesture_p,
+                     layout_matrix = fig_matrix)
+
+# Save:
+
+ggsave('../figures/mouth_both.pdf', mouthin_mouth_gesture, width = 10, height = 5)
+ggsave('../figures/mouth_both.png', mouthin_mouth_gesture, width = 10, height = 5)
+```
+
+
+## Descriptive stats: Head shakes
+
+Check counts for new HS variable (recoded):
+
+```{r}
+neg %>%
+  count(HS_new, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% print(n = Inf)
+```
+
+Plot this.
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+HS_p <- neg %>%
+  count(HS_new, sort = TRUE) %>%
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  mutate(HS_new = ifelse(HS_new == 'HS',
+                         'Head shake', HS_new), # renamings for plot
+         HS_new = ifelse(HS_new == 'NHS, HS',
+                         'NHS > HS', HS_new),
+         HS_new = ifelse(HS_new == 'HS, NHS',
+                         'HS > NHS', HS_new),
+         HS_new = ifelse(HS_new == 'Combination with HS',
+                         'Combo', HS_new),
+         HS_new = ifelse(HS_new == 'NHS',
+                         'No head \nshake', HS_new)) %>% 
+  ggplot(aes(x = reorder(HS_new, Proportion),
+             y = Proportion, fill = reorder(HS_new, Proportion)))
+
+# Add geoms:
+
+HS_p <- HS_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+HS_p <- HS_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(b) Type of head shake (detailed)') +
+  theme_BSL()
+
+# Plot:
+
+HS_p
+
+# Save:
+
+ggsave('../figures/headshake_detailed.pdf', HS_p, width = 6.5, height = 5)
+ggsave('../figures/headshake_detailed.png', HS_p, width = 6.5, height = 5)
+```
+
+Get the counts of HS yes /no variable:
+
+```{r}
+neg %>%
+  count(HS_YesNo, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Make the corresponding plot:
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+HS_YesNo_p <- neg %>%
+  count(HS_YesNo, sort = TRUE) %>%
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(HS_YesNo, Proportion),
+             y = Proportion, fill = reorder(HS_YesNo, Proportion)))
+
+# Add geoms:
+
+HS_YesNo_p <- HS_YesNo_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+HS_YesNo_p <- HS_YesNo_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(a) Presence of head shake') +
+  theme_BSL()
+
+# Plot:
+
+HS_YesNo_p
+
+# Save:
+
+ggsave('../figures/headshake_YesNo.pdf', HS_YesNo_p, width = 6.5, height = 5)
+ggsave('../figures/headshake_YesNo.png', HS_YesNo_p, width = 6.5, height = 5)
+```
+
+Put both of these into a joint plot with gridExtra. First, design a layout matrix, where 1 = plot 1, and 2 = plot 2. NA is the padding between plots.
+
+```{r}
+fig3_matrix <- matrix(c(1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2),
+                      nrow = 1)
+```
+
+Use grid.arrange() to put them both into a plot with the specified matrix.
+
+```{r}
+# When included in double plot, we don't need y-axis label for the (b) plot again:
+
+HS_p <- HS_p +
+  ylab('')
+
+fig3 <- grid.arrange(HS_YesNo_p, HS_p,
+                     layout_matrix = fig3_matrix)
+
+# Save:
+
+ggsave('../figures/both_headshakes.pdf', fig3, width = 12, height = 5)
+ggsave('../figures/both_headshakes.png', fig3, width = 12, height = 5)
+```
+
+
+## Combinations of signalling strategies
+
+Tabulate combinations of the four form variables.
+
+```{r}
+neg %>% count(FormSum) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Check what combinations they are:
+
+```{r}
+neg <- mutate(neg,
+              StrategyCombo = str_c(Manual_YesNo, ' + ',
+                                    Mouthing_YesNo, ' + ',
+                                    MouthGesture_YesNo, ' + ',
+                                    HS_YesNo))
+```
+
+Count:
+
+```{r}
+# 4 strategies
+
+neg %>% filter(FormSum == 4) %>% 
+  count(StrategyCombo, sort = TRUE)
+
+# 3 strategies
+
+neg %>% filter(FormSum == 3) %>% 
+  count(StrategyCombo, sort = TRUE)
+
+# 2 strategies
+
+neg %>% filter(FormSum == 2) %>% 
+  count(StrategyCombo, sort = TRUE)
+
+# 1 strategies
+
+neg %>% filter(FormSum == 1) %>% 
+  count(StrategyCombo, sort = TRUE)
+```
+
+Check those that have more than one encoding strategy:
+
+```{r}
+neg %>%
+  filter(FormSum != 0) %>% 
+  mutate(Multi_YesNo = ifelse(FormSum > 1, 'multiple', 'single')) %>% 
+  count(Multi_YesNo) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of the number of encoding strategies:
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+strat_p <- neg %>%
+  filter(FormSum != 0) %>% 
+  count(FormSum, sort = FALSE) %>%
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  mutate(FormSum = ifelse(FormSum == 1, '1 strategy', FormSum), # renamings for plot
+         FormSum = ifelse(FormSum == 2, '2 strategies', FormSum),
+         FormSum = ifelse(FormSum == 3, '3 strategies', FormSum),
+         FormSum = ifelse(FormSum == 4, '4 strategies', FormSum)) %>% 
+  ggplot(aes(x = FormSum,
+             y = Proportion, fill = FormSum, Proportion))
+
+# Add geoms:
+
+strat_p <- strat_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+strat_p <- strat_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('Number of signalling strategies') +
+  theme_BSL()
+
+# Plot:
+
+strat_p
+
+# Save:
+
+ggsave('../figures/strategy_count.pdf', strat_p, width = 6.5, height = 5)
+ggsave('../figures/strategy_count.png', strat_p, width = 6.5, height = 5)
+```
+
+## Comparison to patterns for complex clauses
+
+This section looks at the extent to which the patterns for complex clauses are different. This will be done by means of Chi-square tests. We will collate compl and neg into "both", with an identifier variable:
+
+```{r}
+both <- bind_rows(neg, compl)
+both$ClauseType <- c(rep('Single', nrow(neg)),
+                     rep('Non-single', nrow(compl)))
+```
+
+Check effect sizes (for the interaction between clause type with all variables):
+
+```{r}
+# Negation function:
+
+with(both,
+     cramersV(table(N_function_value, ClauseType)))
+
+# Manual negation:
+
+with(both,
+     cramersV(table(N_manual_value, ClauseType)))
+
+# Non-Manual negation:
+
+with(both,
+     cramersV(table(N_nonmanual_value, ClauseType)))
+
+# Negation in mouthing:
+
+with(both,
+     cramersV(table(MouthingNegation_value, ClauseType)))
+
+# Mouth gestures:
+
+with(both,
+     cramersV(table(MouthGesture_YesNo, ClauseType)))
+
+# Head shaking:
+
+with(both,
+     cramersV(table(HS_new, ClauseType)))
+
+# Head shaking:
+
+both <- mutate(both,
+               HS_YesNo = ifelse(HS_YesNo == 'Any\nhead shake', 'HS', HS_YesNo),
+               HS_YesNo = ifelse(HS_YesNo == 'No\nhead shake', 'no HS', HS_YesNo))
+with(both,
+     cramersV(table(HS_YesNo, ClauseType)))
+
+# Multi-strategy count:
+
+with(both,
+     cramersV(table(FormSum, ClauseType)))
+```
+
+Get the counts for the different variables. Function of negation:
+
+```{r}
+compl %>%
+  count(N_function_value, sort = TRUE) %>%
+  filter(!is.na(N_function_value)) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Manual negation signs:
+
+```{r}
+compl %>%
+  count(N_manual_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Non-manual:
+
+```{r}
+compl %>%
+  count(N_nonmanual_value , sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Negation in mouthing:
+
+```{r}
+compl %>%
+  count(MouthingNegation_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Mouth gestures:
+
+```{r}
+compl %>%
+  count(MouthGesture_YesNo, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+Head shaking:
+
+```{r}
+compl %>%
+  count(HS, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% print(n = Inf)
+```
+
+Head shaking:
+
+```{r}
+compl %>%
+  count(HS_YesNo, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% print(n = Inf)
+```
+
+Strategy count:
+
+```{r}
+compl %>%
+  count(FormSum, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% print(n = Inf)
+```
+
+## Individual variation across the variables
+
+Get a data frame with only those that have at least 10 data points:
+
+```{r}
+above_10s <- both %>%
+  count(Participant) %>% 
+  filter(n > 10) %>%
+  pull(Participant)
+
+length(above_10s)
+
+neg_10 <- filter(both,
+                 Participant %in% above_10s)
+```
+
+Check manual signs for negation per participant:
+
+```{r}
+ppt_manual_tab <- with(neg_10, table(Participant, N_manual_value))
+
+# Check:
+
+rowprop_tab(ppt_manual_tab)
+
+# Which max:
+
+table(apply(ppt_manual_tab, MARGIN = 1,
+            FUN = function(x) colnames(ppt_manual_tab)[which.max(x)]))
+
+# Which max percentage:
+
+prop_tab(table(apply(ppt_manual_tab, MARGIN = 1,
+                     FUN = function(x) colnames(ppt_manual_tab)[which.max(x)])))
+
+```
+
+Check manual versus non-manual per participant:
+
+```{r}
+ppt_nonmanual_tab <- with(neg_10, table(Participant, N_nonmanual_value))
+
+# Check:
+
+rowprop_tab(ppt_nonmanual_tab)
+
+# Which max:
+
+table(apply(ppt_nonmanual_tab, MARGIN = 1,
+            FUN = function(x) colnames(ppt_nonmanual_tab)[which.max(x)]))
+
+# Which max percentage:
+
+prop_tab(table(apply(ppt_nonmanual_tab, MARGIN = 1,
+                     FUN = function(x) colnames(ppt_nonmanual_tab)[which.max(x)])))
+
+```
+
+Check mouthing per participant:
+
+```{r}
+ppt_mouthing_tab <- with(neg_10, table(Participant, MouthingNegation_value))
+
+# Check:
+
+rowprop_tab(ppt_mouthing_tab)
+
+# Which max:
+
+table(apply(ppt_mouthing_tab, MARGIN = 1,
+            FUN = function(x) colnames(ppt_mouthing_tab)[which.max(x)]))
+
+# Percentage:
+
+prop_tab(table(apply(ppt_mouthing_tab, MARGIN = 1,
+                     FUN = function(x) colnames(ppt_mouthing_tab)[which.max(x)])))
+
+```
+
+Check mouth gesture per participant:
+
+```{r}
+ppt_mouthgesture_tab <- with(neg_10, table(Participant, MouthGesture_YesNo))
+
+# Check:
+
+rowprop_tab(ppt_mouthgesture_tab)
+
+# Which max:
+
+table(apply(ppt_mouthgesture_tab, MARGIN = 1,
+            FUN = function(x) colnames(ppt_mouthgesture_tab)[which.max(x)]))
+
+# Percentage:
+
+prop_tab(table(apply(ppt_mouthgesture_tab, MARGIN = 1,
+                     FUN = function(x) colnames(ppt_mouthgesture_tab)[which.max(x)])))
+
+```
+
+Check head shake per participant:
+
+```{r}
+ppt_HS_tab <- with(neg_10, table(Participant, HS_YesNo))
+
+# Check:
+
+rowprop_tab(ppt_HS_tab)
+
+# Which max:
+
+table(apply(ppt_HS_tab, MARGIN = 1,
+            FUN = function(x) colnames(ppt_HS_tab)[which.max(x)]))
+
+# Percentage:
+
+prop_tab(table(apply(ppt_HS_tab, MARGIN = 1,
+                     FUN = function(x) colnames(ppt_HS_tab)[which.max(x)])))
+```
+
+Check head shake per participant:
+
+```{r}
+ppt_strategy_tab <- with(neg_10, table(Participant, FormSum))
+
+# Check:
+
+rowprop_tab(ppt_strategy_tab)
+
+# Which max:
+
+table(apply(ppt_strategy_tab, MARGIN = 1,
+            FUN = function(x) colnames(ppt_strategy_tab)[which.max(x)]))
+
+# Percentage:
+
+prop_tab(table(apply(ppt_strategy_tab, MARGIN = 1,
+                     FUN = function(x) colnames(ppt_strategy_tab)[which.max(x)])))
+```
+
+## Form and function
+
+First, let's look at manual signaling.
+
+```{r}
+# Function type:
+
+with(both,
+     cramersV(table(Manual_YesNo, N_function_value)))
+round(with(both,
+           chisq.test(table(Manual_YesNo, N_function_value))$stdres), 2)
+```
+
+Second, mouthing:
+
+```{r}
+round(with(neg,
+           chisq.test(table(Mouthing_YesNo, N_function_value))$stdres), 2)
+```
+
+Third, mouth gestures:
+
+```{r}
+round(with(neg,
+           chisq.test(table(MouthGesture_YesNo, N_function_value))$stdres), 2)
+```
+
+Fourth, head shakes:
+
+```{r}
+round(with(neg,
+           chisq.test(table(HS_YesNo, N_function_value))$stdres), 2)
+```
+
+Fifth, strategy count:
+
+```{r}
+round(with(neg,
+           chisq.test(table(FormSum, N_function_value))$stdres), 2)
+```
+
+
+
+
+## Descriptive stats: CLU complex
+
+Check:
+
+```{r}
+compl %>%
+  count(CLUcomplex_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+
+## Descriptive stats: CLU within CLU
+
+Check counts:
+
+```{r}
+compl %>%
+  count(CLUwithinCLU_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+How many are NAs versus something else:
+
+```{r}
+compl %>%
+  mutate(NoCLU = ifelse(is.na(CLUwithinCLU_value), 'not defined', 'some type of CLU within')) %>% 
+  count(NoCLU) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Most of these are "Embed" type:
+
+```{r}
+table(compl$CLUcomposite_value, compl$CLUwithinCLU_value)
+```
+
+Count this:
+
+```{r}
+compl %>%
+  count(CLUwithin_simple, sort = TRUE) %>%
+  filter(!is.na(CLUwithin_simple)) %>% 
+  mutate(Perc = percentage(n))
+```
+
+
+Make a plot of this:
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+within_p <- compl %>%
+  count(CLUwithin_simple, sort = TRUE) %>%
+  filter(!is.na(CLUwithin_simple)) %>% 
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(CLUwithin_simple, Proportion),
+             y = Proportion, fill = reorder(CLUwithin_simple, Proportion)))
+
+# Add geoms:
+
+within_p <- within_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+within_p <- within_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(a) CLU within') +
+  theme_BSL()
+
+# Plot:
+
+within_p
+
+# Save:
+
+ggsave('../figures/CLU_within.pdf', within_p, width = 4.5, height = 5)
+ggsave('../figures/CLU_within.png', within_p, width = 4.5, height = 5)
+```
+
+
+## Descriptive stats: CLU complex
+
+Check counts:
+
+```{r}
+compl %>%
+  count(CLUcomplex_value, sort = TRUE) %>%
+  mutate(Perc = percentage(n))
+```
+
+How many are NAs versus something else:
+
+```{r}
+compl %>%
+  mutate(CLUcomplex_value = ifelse(is.na(CLUcomplex_value),
+                                   'not defined', 'some type of CLU complex')) %>% 
+  count(CLUcomplex_value) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Most of these are "Depend" type:
+
+```{r}
+table(compl$CLUcomposite_value, compl$CLUcomplex_value)
+```
+
+Count this:
+
+```{r}
+compl %>%
+  count(CLUcomplex_value, sort = TRUE) %>%
+  filter(!is.na(CLUcomplex_value)) %>% 
+  mutate(Perc = percentage(n))
+```
+
+Make a plot of this:
+
+```{r, fig.width = 5.5, fig.height = 6}
+# Data and aesthetics:
+
+complex_p <- compl %>%
+  count(CLUcomplex_value, sort = TRUE) %>%
+  filter(!is.na(CLUcomplex_value)) %>% 
+  mutate(Proportion = proportion(n),
+         Perc = percentage(n),
+         N = str_c('N = ', n)) %>% 
+  ggplot(aes(x = reorder(CLUcomplex_value, Proportion),
+             y = Proportion, fill = reorder(CLUcomplex_value, Proportion)))
+
+# Add geoms:
+
+complex_p <- complex_p +
+  geom_bar(stat = 'identity', col = 'black', width = 0.6) +
+  geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+
+# Add other plot features:
+
+complex_p <- complex_p +
+  scale_fill_viridis_d() +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  xlab('') +
+  ggtitle('(b) CLU complex') +
+  theme_BSL()
+
+# Plot:
+
+complex_p
+
+# Save:
+
+ggsave('../figures/CLU_complex.pdf', within_p, width = 4.5, height = 5)
+ggsave('../figures/CLU_complex.png', within_p, width = 4.5, height = 5)
+```
+
+Put both of these into a joint plot with gridExtra. First, design a layout matrix, where 1 = plot 1, and 2 = plot 2. NA is the padding between plots.
+
+```{r}
+CLU_matrix <- matrix(c(1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2),
+                      nrow = 1)
+```
+
+Use grid.arrange() to put them both into a plot with the specified matrix.
+
+```{r}
+# When included in double plot, we don't need y-axis label for the (b) plot again:
+
+complex_p <- complex_p +
+  ylab('')
+
+CLU_subtype_p <- grid.arrange(within_p, complex_p,
+                              layout_matrix = CLU_matrix)
+
+# Save:
+
+ggsave('../figures/CLU_subtype.pdf', CLU_subtype_p, width = 12, height = 5)
+ggsave('../figures/CLU_subtype.png', CLU_subtype_p, width = 12, height = 5)
+```
+
+
+## Sociolinguistic variation in form
+
+Check whether there's any association between whether the family has at least one deaf member or not:
+
+```{r}
+# Manual sign:
+
+round(with(neg,
+           chisq.test(table(Manual_YesNo, Family))$stdres), 2)
+
+# Mouthing:
+
+round(with(neg,
+           chisq.test(table(Mouthing_YesNo, Family))$stdres), 2)
+
+# Mouth gesture:
+
+round(with(neg,
+           chisq.test(table(MouthGesture_YesNo, Family))$stdres), 2)
+
+# Head shake:
+
+round(with(neg,
+           chisq.test(table(HS_YesNo, Family))$stdres), 2)
+```
+
+Check whether there's any association between form and location:
+
+```{r}
+# Manual sign:
+
+round(with(neg,
+           chisq.test(table(Manual_YesNo, Location))$stdres), 2)
+
+# Mouthing:
+
+round(with(neg,
+           chisq.test(table(Mouthing_YesNo, Location))$stdres), 2)
+
+# Mouth gesture:
+
+round(with(neg,
+           chisq.test(table(MouthGesture_YesNo, Location))$stdres), 2)
+
+# Head shake:
+
+round(with(neg,
+           chisq.test(table(HS_YesNo, Location))$stdres), 2)
+```
+
+Check whether there's any association between form and gender:
+
+```{r}
+# Manual sign:
+
+round(with(neg,
+           chisq.test(table(Manual_YesNo, Gender))$stdres), 2)
+
+# Mouthing:
+
+round(with(neg,
+           chisq.test(table(Mouthing_YesNo, Gender))$stdres), 2)
+
+# Mouth gesture:
+
+round(with(neg,
+           chisq.test(table(MouthGesture_YesNo, Gender))$stdres), 2)
+
+# Head shake:
+
+round(with(neg,
+           chisq.test(table(HS_YesNo, Gender))$stdres), 2)
+```
+
+Check whether there's any association between form and age group:
+
+```{r}
+# What is the median age?
+
+median(neg$Age)
+
+# Perform a median split, as well as a 20-30, 40-50, and 60+ split:
+
+neg <- mutate(neg,
+              AgeMedianSplit = ifelse(Age > median(Age), 'old', 'young'),
+              AgeSplit = ifelse(Age < 30, '<30', Age),
+              AgeSplit = ifelse(AgeSplit >= 30 & AgeSplit < 60, '30-60', AgeSplit),
+              AgeSplit = ifelse(AgeSplit >= 60, '60+', AgeSplit))
+
+# Manual sign:
+
+round(with(neg,
+           chisq.test(table(Manual_YesNo, AgeSplit))$stdres), 2)
+
+# Mouthing:
+
+round(with(neg,
+           chisq.test(table(Mouthing_YesNo, AgeSplit))$stdres), 2)
+
+# Mouth gesture:
+
+round(with(neg,
+           chisq.test(table(MouthGesture_YesNo, AgeSplit))$stdres), 2)
+
+# Head shake:
+
+round(with(neg,
+           chisq.test(table(HS_YesNo, AgeSplit))$stdres), 2)
+```
+
+Check whether there's any association between form and BSL teaching:
+
+```{r}
+# Manual sign:
+
+round(with(neg,
+           chisq.test(table(Manual_YesNo, Taught_BSL_YesNo))$stdres), 2)
+
+# Mouthing:
+
+round(with(neg,
+           chisq.test(table(Mouthing_YesNo, Taught_BSL_YesNo))$stdres), 2)
+
+# Mouth gesture:
+
+round(with(neg,
+           chisq.test(table(MouthGesture_YesNo, Taught_BSL_YesNo))$stdres), 2)
+
+# Head shake:
+
+round(with(neg,
+           chisq.test(table(HS_YesNo, Taught_BSL_YesNo))$stdres), 2)
+```
+
