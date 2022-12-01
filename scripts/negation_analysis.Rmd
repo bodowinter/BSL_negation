@@ -40,13 +40,9 @@ source('negation_helper_functions.R')
 Load data:
 
 ```{r, message = FALSE, warning = FALSE}
-# Original data with Adam's coding for regular/irregular:
+# Original data with Adam's new coding for regular/irregular negation and 4 data points of mouthings re-classified and comments deleted:
 
-neg <- read_csv('../data/BSL_negation_12_June_2020.csv')
-
-# New data with regular/irregular distinction:
-
-neg_reg <- read_csv('../data/BSL_regularity_addition.csv')
+neg <- read_csv('../data/BSL_negation_recoded_final_01_12_2022.csv')
 ```
 
 Show first few rows and all columns:
@@ -56,27 +52,6 @@ neg %>% print(n = 2, width = Inf)
 ```
 
 ## Preprocessing and cleaning
-
-**Addition 21/10/22:** The new table with Adam's coding for regular/irregular negation *should* be organized the same way, but better be safe than sorry and double check. Let's use `bind_cols()` to merge and then check that the identifiers are the same in all instances:
-
-```{r}
-neg <- bind_cols(neg, select(neg_reg, regularity))
-
-# Check if all the same:
-
-all(neg$`ClauseLikeUnit(CLU)-value` == neg_reg$`ClauseLikeUnit(CLU)-value`)
-
-# Not the case:
-
-which(neg$`ClauseLikeUnit(CLU)-value` != neg_reg$`ClauseLikeUnit(CLU)-value`)
-
-# Only one:
-
-neg[11, ]$`ClauseLikeUnit(CLU)-value`
-neg_reg[11, ]$`ClauseLikeUnit(CLU)-value`
-```
-
-Ah ok, it's merely a naming difference, so nothing to worry about.
 
 Change hyphens in column names to underscores to avoid tidyverse complications:
 
@@ -147,15 +122,33 @@ Extract information about whether the signer is left- or right-handed. There are
 
 ```{r}
 neg <- mutate(neg,
-              HandednessCode = ifelse(str_detect(CLU_value, 'LH'), 'LH', 'RH'),
-              Handedness = ifelse(HandednessCode == 'LH', 'left-handed', 'right-handed'))
+              HandednessCode = ifelse(str_detect(CLU_value, 'LH'),
+                                      'LH', 'RH'),
+              Handedness = ifelse(HandednessCode == 'LH',
+                                  'left-handed', 'right-handed'))
 ```
 
 Process the "Negation" column so that "INDEFINITE" is "Indefinite".
 
 ```{r}
 neg <- mutate(neg,
-              Negation = ifelse(Negation == 'INDEFINITE', 'Indefinite', Negation))
+              Negation = ifelse(Negation == 'INDEFINITE',
+                                'Indefinite', Negation))
+```
+
+The following four items need to be recoded from single to multiple in the `MouthingNegation_value` column:
+
+```{r}
+these_ids <- c('BM13F39WHC_CLU#082', 'LN25M76WHC_CLU#151',
+               'MC21F67WHNC_CLU#145', 'MC27F24WDC_CLU#048')
+
+these_rows <- neg$CLU_value %in% these_ids
+```
+
+Get those and change the value of the `MouthingNegation_value` column to `Multiple`:
+
+```{r}
+neg[these_rows, ]$MouthingNegation_value <- 'Multiple'
 ```
 
 ## Preprocessing head shakes, mouth gestures, and multi-strategy counts
@@ -1068,6 +1061,19 @@ neg %>%
   mutate(Perc = percentage(n)) %>% 
   print(n = 20)
 ```
+
+**Update Dec 1/2022**: New data from Adam and Kearsy about mouthings being recoded:
+
+```{r}
+neg %>%
+  filter(NegSingleClausesMouthing_negator != 'Absent') %>% 
+  filter(NegSingleClausesMouthing_negator != 'Multiple') %>%
+  filter(NegSingleClausesMouthing_negator != 'Multiple?') %>% 
+  count(NegSingleClausesMouthing_negator, sort = TRUE) %>%
+  mutate(Perc = percentage(n)) %>% 
+  print(n = 20)
+```
+
 
 
 ## Descriptive stats: Mouth gestures
