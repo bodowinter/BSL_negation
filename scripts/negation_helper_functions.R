@@ -21,21 +21,21 @@ rowprop_tab <- function(x) round(prop.table(x, 1), 2)
 # ggplot2 theme:
 
 theme_BSL <- function() {
-  theme_minimal(base_size = 16) %+replace% 
+  theme_classic(base_size = 16) %+replace% 
     theme(
       legend.position = '',
-      axis.title.y = element_text(size = 20,
+      axis.title.y = element_text(size = 18,
                                   margin = margin(r = 20, l = 0,
                                                   t = 0, b = 0),
                                   angle = 90,
                                   face = 'bold'),
-      axis.title = element_text(size = 20,
+      axis.title = element_text(size = 18,
                                 face = 'bold'),
       axis.text.x = element_text(face = 'bold',
                                  color = 'black',
-                                 size = 12,
+                                 size = 11,
                                  vjust = 1),
-      plot.title = element_text(size = 20,
+      plot.title = element_text(size = 18,
                            face = 'bold',
                            margin = margin(r = 0, l = 0,
                                            t = 0, b = 10),
@@ -46,27 +46,53 @@ theme_BSL <- function() {
     )
 }
 
+# For horizontal plot only, switch of all panel grid and do vertical lines manually in plotting command with geom_h/vline():
 
-# ggplot2 theme, with 45 degree rotated x-axis text:
-
-theme_BSL_45 <- function() {
-  theme_minimal(base_size = 16) %+replace% 
+theme_BSL_horizontal <- function() {
+  theme_classic(base_size = 16) %+replace% 
     theme(
       legend.position = '',
-      axis.title.y = element_text(size = 20,
+      axis.title.y = element_text(size = 18,
                                   margin = margin(r = 20, l = 0,
                                                   t = 0, b = 0),
                                   angle = 90,
                                   face = 'bold'),
-      axis.title = element_text(size = 20,
+      axis.title = element_text(size = 18,
                                 face = 'bold'),
       axis.text.x = element_text(face = 'bold',
                                  color = 'black',
-                                 size = 12,
+                                 size = 11,
+                                 vjust = 1),
+      plot.title = element_text(size = 18,
+                                face = 'bold',
+                                margin = margin(r = 0, l = 0,
+                                                t = 0, b = 10),
+                                hjust = 0),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank()
+    )
+}
+
+# ggplot2 theme, with 45 degree rotated x-axis text:
+
+theme_BSL_45 <- function() {
+  theme_classic(base_size = 16) %+replace% 
+    theme(
+      legend.position = '',
+      axis.title.y = element_text(size = 18,
+                                  margin = margin(r = 20, l = 0,
+                                                  t = 0, b = 0),
+                                  angle = 90,
+                                  face = 'bold'),
+      axis.title = element_text(size = 18,
+                                face = 'bold'),
+      axis.text.x = element_text(face = 'bold',
+                                 color = 'black',
+                                 size = 11,
                                  vjust = 1,
                                  hjust = 1,
                                  angle = 45),
-      plot.title = element_text(size = 20,
+      plot.title = element_text(size = 18,
                                 face = 'bold',
                                 margin = margin(r = 0, l = 0,
                                                 t = 0, b = 10),

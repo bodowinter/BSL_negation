@@ -471,7 +471,8 @@ neg_p <- neg %>%
                            'Non-negated\nclause', Negation),
          Negation = ifelse(Negation == 'Negated clause',
                            'Negated\nclause', Negation),
-         N = str_c('N = ', n)) %>% 
+         N = str_c('N = ', n),
+         both = str_c(N, '\n', Perc)) %>% 
   ggplot(aes(x = reorder(Negation, Proportion),
              y = Proportion, fill = reorder(Negation, Proportion)))
 
@@ -479,8 +480,10 @@ neg_p <- neg %>%
 
 neg_p <- neg_p +
   geom_bar(stat = 'identity', col = 'black', width = 0.6) +
-  geom_text(aes(label = N), nudge_y = 0.055) +
+  # geom_text(aes(label = N), nudge_y = 0.055) +
+  geom_label(aes(label = N), nudge_y = 0.055, fill = 'white') +
   geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+  # geom_label(aes(label = both), nudge_y = 0.01, fill = 'white') # reviewer suggestion
 
 # Add other plot features:
 
@@ -736,8 +739,10 @@ function_p <- neg %>%
 # Add geoms:
 
 function_p <- function_p +
+  geom_hline(yintercept = seq(0.2, 0.8, 0.2), color = 'grey80') +
   geom_bar(stat = 'identity', col = 'black', width = 0.6) +
-  geom_text(aes(label = N), nudge_y = 0.052)
+  geom_label(aes(label = N), nudge_y = 0.035,
+             fill = 'white', size = 4, hjust = 0.5)
 
 # Add other plot features:
 
@@ -747,7 +752,7 @@ function_p <- function_p +
                      expand = c(0, 0)) +
   xlab(NULL) +
   ggtitle('Discourse contexts of single negated clauses') +
-  theme_BSL() +
+  theme_BSL_horizontal() +
   theme(plot.margin = margin(r = 1.5))
 
 # Plot:
@@ -756,6 +761,7 @@ function_p <- function_p + coord_flip()
 
 # Save:
 
+function_p
 ggsave('../figures/function_horizontal.pdf',
        function_p, width = 6.5, height = 4)
 ggsave('../figures/function_horizontal.png',
