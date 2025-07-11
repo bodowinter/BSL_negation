@@ -921,6 +921,8 @@ neg %>%
 
 Make a plot of this.
 
+** Bodo Winter July 10, 2025 **: Reviewer remarked on label clipping for the lower category (no non-manual negation) as it gets too close to the bottom y-axis. Fixing this requires setting different nudges for the two categories, which I'll do by setting a separate nudge variable.
+
 ```{r, fig.width = 5.5, fig.height = 6}
 # Data and aesthetics:
 
@@ -931,7 +933,9 @@ nonmanual_p <- neg %>%
                                     'No non-manual\nnegation'),
          Proportion = proportion(n),
          Perc = percentage(n),
-         N = str_c('N = ', n)) %>% 
+         N = str_c('N = ', n),
+         label_nudges = c(-0.01, 0.013),
+         text_nudges = c(0.055, 0.055 + 0.013)) %>% 
   ggplot(aes(x = reorder(N_nonmanual_value, Proportion),
              y = Proportion, fill = reorder(N_nonmanual_value, Proportion)))
 
@@ -939,8 +943,8 @@ nonmanual_p <- neg %>%
 
 nonmanual_p <- nonmanual_p +
   geom_bar(stat = 'identity', col = 'black', width = 0.6) +
-  geom_text(aes(label = N), nudge_y = 0.055) +
-  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+  geom_text(aes(label = N, y = Proportion + text_nudges)) +
+  geom_label(aes(y = Proportion + label_nudges, label = Perc), fill = 'white')
 
 # Add other plot features:
 
@@ -1221,8 +1225,9 @@ neg %>%
   print(n = Inf)
 ```
 
-
 Plot this.
+
+**Addition July 10, 2025**: Reviewer 2 remarked on the floating bars, which we'll fix now. For that, as above, we'll also have to create an individual nudge variable.
 
 ```{r, fig.width = 5.5, fig.height = 6}
 # Data and aesthetics:
@@ -1242,7 +1247,9 @@ HS_p <- neg %>%
          HS_new = ifelse(HS_new == 'Combination with HS',
                          'Combo', HS_new),
          HS_new = ifelse(HS_new == 'NHS',
-                         'No HS', HS_new)) %>% 
+                         'No HS', HS_new),
+         label_nudges = rev(c(0, -0.01, -0.01, -0.01, -0.01, -0.01)),
+         text_nudges = rev(c(0.055 + 0.01, 0.055, 0.055, 0.055, 0.055, 0.055))) %>% 
   ggplot(aes(x = reorder(HS_new, Proportion),
              y = Proportion, fill = reorder(HS_new, Proportion)))
 
@@ -1250,14 +1257,15 @@ HS_p <- neg %>%
 
 HS_p <- HS_p +
   geom_bar(stat = 'identity', col = 'black', width = 0.6) +
-  geom_text(aes(label = N), nudge_y = 0.055) +
-  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+  geom_text(aes(label = N, y = Proportion + text_nudges)) +
+  geom_label(aes(label = Perc, y = Proportion + label_nudges), fill = 'white')
 
 # Add other plot features:
 
 HS_p <- HS_p +
   scale_fill_viridis_d() +
-  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05),
+                     expand = c(0, 0)) +
   xlab('') +
   ggtitle('(b) Type of head movement') +
   theme_BSL()
@@ -1408,6 +1416,8 @@ neg %>%
 
 Make a plot of the number of encoding strategies:
 
+** Bodo Winter, Update July 10, 2025:** Need to fix y-axis label here too and then adjust nudges for labels.
+
 ```{r, fig.width = 5.5, fig.height = 6}
 # Data and aesthetics:
 
@@ -1420,7 +1430,9 @@ strat_p <- neg %>%
   mutate(FormSum = ifelse(FormSum == 1, '1 strategy', FormSum), # renamings for plot
          FormSum = ifelse(FormSum == 2, '2 strategies', FormSum),
          FormSum = ifelse(FormSum == 3, '3 strategies', FormSum),
-         FormSum = ifelse(FormSum == 4, '4 strategies', FormSum)) %>% 
+         FormSum = ifelse(FormSum == 4, '4 strategies', FormSum),
+         nudge_labels = c(-0.01, -0.01, -0.01, 0.01),
+         nudge_text = c(0.055, 0.055, 0.055, 0.055 + 0.02)) %>% 
   ggplot(aes(x = FormSum,
              y = Proportion, fill = FormSum, Proportion))
 
@@ -1428,14 +1440,15 @@ strat_p <- neg %>%
 
 strat_p <- strat_p +
   geom_bar(stat = 'identity', col = 'black', width = 0.6) +
-  geom_text(aes(label = N), nudge_y = 0.055) +
-  geom_label(aes(label = Perc), nudge_y = -0.01, fill = 'white')
+  geom_text(aes(label = N, y = Proportion + nudge_text)) +
+  geom_label(aes(label = Perc, y = Proportion + nudge_labels), fill = 'white')
 
 # Add other plot features:
 
 strat_p <- strat_p +
   scale_fill_viridis_d() +
-  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05)) +
+  scale_y_continuous(breaks = seq(0, 1.0, 0.2), limits = c(0, 1.05),
+                     expand = c(0, 0)) +
   xlab('') +
   ggtitle('Number of signalling strategies') +
   theme_BSL()
